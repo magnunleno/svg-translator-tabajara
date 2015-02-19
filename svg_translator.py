@@ -25,25 +25,39 @@ TSPAN_TAG = re.compile("^\{.*?\}tspan$")
 INVALID_TEXT = re.compile("[<>^*=]")
 
 URL = "http://translate.google.com/translate_a/" +\
-    "t?client=p&ie=UTF-8&oe=UTF-8&sl=pt&tl=en&text={}"
+    "t?client=p&ie=UTF-8&oe=UTF-8&sl={from_lang}&tl={to_lang}&text={text}"
+
+AUTODETECT_URL = "http://translate.google.com/translate_a/" +\
+    "t?client=p&ie=UTF-8&oe=UTF-8&tl={to_lang}&text={text}"
 
 log = None
 
 
-def translate(text):
+def translate(text, from_lang, to_lang):
     text = quote(text, '')
     headers = {
         'User-Agent': 'Mozilla/5.0 (X11; Linux i586; ' +
                       'rv:31.0) Gecko/20100101 Firefox/31.0'
         }
-    req = request.Request(url=URL.format(text), headers=headers)
+    if from_lang:
+        url = URL.format(
+            text=text,
+            from_lang=from_lang,
+            to_lang=to_lang,
+            )
+    else:
+        url = AUTODETECT_URL.format(
+            text=text,
+            to_lang=to_lang,
+            )
+    req = request.Request(url=url, headers=headers)
     r = request.urlopen(req)
     out = json.loads(r.read().decode('utf-8'))
     log.info("After translation: {}".format(out['sentences'][0]['trans']))
     return out['sentences'][0]['trans']
 
 
-def translate_split_paragraph(paragraph):
+def translate_split_paragraph(paragraph, from_lang, to_lang):
     size = len(paragraph)
     max_size = max([len(text) for (child, text) in paragraph])
 
@@ -55,7 +69,7 @@ def translate_split_paragraph(paragraph):
 
     log.debug("Tokenizing phrases.")
     phrases = nltk.sent_tokenize(raw_paragraph)
-    phrases = ' '.join([translate(phrase) for phrase in phrases])
+    phrases = ' '.join([translate(phrase, from_lang, to_lang) for phrase in phrases])
     log.debug("Wrapping paragraph to {}".format(max_size - 1))
     translated_paragraph = wrap(phrases, max_size - 1, replace_whitespace=True)
 
@@ -100,7 +114,7 @@ def get_out_name(fname, out_pattern):
     return out_name
 
 
-def translate_file(fname, out_pattern="{filename}_translated{extension}"):
+def translate_file(fname, from_lang, to_lang, out_pattern="{filename}_translated{extension}"):
     log.debug("Preparing to translate file '{}'...".format(fname))
     tree, text_list = get_text_tags(fname)
     log.debug("File parsed!")
@@ -108,7 +122,7 @@ def translate_file(fname, out_pattern="{filename}_translated{extension}"):
         if text.text:
             if not INVALID_TEXT.match(text.text):
                 log.debug("Text tag with contents: {}".format(text.text))
-                translated = translate(text.text)
+                translated = translate(text.text, from_lang, to_lang)
                 text.text = translated
                 log.debug("Text replaced!")
             else:
@@ -140,14 +154,14 @@ def translate_file(fname, out_pattern="{filename}_translated{extension}"):
         if paragraph and len(paragraph) == 1:
             (child, text) = paragraph[0]
             log.debug("Single paragraph found: {}".format(text))
-            child.text = translate(text)
+            child.text = translate(text, from_lang, to_lang)
             log.debug("Text replaced!")
 
         if paragraph and len(paragraph) > 1:
             log.debug(
                 "Found a paragraph composed by {} parts".format(len(paragraph))
                 )
-            translate_split_paragraph(paragraph)
+            translate_split_paragraph(paragraph, from_lang, to_lang)
 
     log.debug("Generating string.")
     out = etree.tostring(tree, encoding='utf-8')
@@ -179,11 +193,11 @@ def parse_args():
         help="SVG Files to translate.",
         )
     parser.add_argument(
-        '-f', '--from', action="store",
+        '-f', '--from-lang', action="store", default=None,
         help="Original language from the SVG file.",
         )
     parser.add_argument(
-        '-t', '--to', action="store",
+        '-t', '--to-lang', action="store", default="en",
         help="Language for the output SVG file.",
         )
     parser.add_argument(
@@ -249,5 +263,5 @@ if __name__ == '__main__':
     log.debug("Done: {}".format(str(fnames)))
 
     for fname in fnames:
-        translate_file(fname, args.out)
+        translate_file(fname, args.from_lang, args.to_lang, args.out)
     log.debug("Quitting!")
